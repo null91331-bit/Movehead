@@ -1,213 +1,471 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="az">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
 <title>Baxış İstiqaməti</title>
+
 <style>
-  *{box-sizing:border-box}
-  body{margin:0;background:#111;color:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;min-height:100vh;display:flex;flex-direction:column}
-  header{padding:16px;text-align:center;font-weight:700;font-size:20px}
-  #wrap{position:relative;flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#000}
-  video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
-  #overlay{position:absolute;inset:0;pointer-events:none}
-  .box{position:absolute;left:50%;top:42%;transform:translate(-50%,-50%);width:64vw;height:46vw;max-width:380px;max-height:280px;border:2px solid rgba(255,255,255,.7);border-radius:24px;box-shadow:0 0 0 9999px rgba(0,0,0,.18)}
-  #panel{padding:14px 16px 18px;background:#181818}
-  #direction{font-size:34px;font-weight:800;text-align:center;min-height:46px}
-  #status{text-align:center;color:#bbb;margin-top:6px}
-  #start{display:block;margin:12px auto 0;border:0;border-radius:14px;padding:13px 22px;font-size:17px;font-weight:700;background:#fff;color:#111}
-  #start:disabled{opacity:.5}
-  #hint{text-align:center;color:#999;font-size:12px;margin-top:8px}
-  canvas{display:none}
+body {
+    margin: 0;
+    background: #111;
+    color: white;
+    font-family: Arial, sans-serif;
+    text-align: center;
+}
+
+h1 {
+    margin: 15px;
+}
+
+video {
+    width: 100%;
+    max-width: 700px;
+    border-radius: 15px;
+    transform: scaleX(-1);
+    background: black;
+}
+
+#direction {
+    font-size: 40px;
+    font-weight: bold;
+    margin: 20px;
+}
+
+#status {
+    color: #bbb;
+    font-size: 17px;
+}
+
+button {
+    font-size: 20px;
+    padding: 15px 25px;
+    border: none;
+    border-radius: 12px;
+    margin: 15px;
+}
 </style>
 </head>
+
 <body>
-<header>👁️ Baxış İstiqaməti</header>
-<div id="wrap">
-  <video id="video" playsinline autoplay muted></video>
-  <div id="overlay"><div class="box"></div></div>
-  <canvas id="canvas"></canvas>
-</div>
-<div id="panel">
-  <div id="direction">Hazır deyil</div>
-  <div id="status">“Kameranı başlat” düyməsinə bas.</div>
-  <button id="start">Kameranı başlat</button>
-  <div id="hint">Başını və üzünü çərçivənin içində saxla.</div>
+
+<h1>👁️ Baxış İstiqaməti</h1>
+
+<video id="camera" autoplay playsinline muted></video>
+
+<div id="direction">Kameranı başlat</div>
+
+<div id="status">
+Üzünü kameraya tut
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js"></script>
+<button onclick="startCamera()">
+📷 Kameranı başlat
+</button>
+
+<!-- Üz və göz tanıma sistemi -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
 <script>
-const video = document.getElementById('video');
-const canvas = document.getElementById('canvas');
-const startBtn = document.getElementById('start');
-const directionEl = document.getElementById('direction');
-const statusEl = document.getElementById('status');
-const ctx = canvas.getContext('2d');
 
-let faceMesh, camera;
+const video = document.getElementById("camera");
+
+const direction =
+document.getElementById("direction");
+
+const status =
+document.getElementById("status");
+
+let faceMesh;
+let camera;
+
 let lastDirection = "";
-let lastSpeakAt = 0;
-let stableDirection = "";
-let stableSince = 0;
 
-function say(text){
-  if(!('speechSynthesis' in window)) return;
-  window.speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = 'az-AZ';
-  u.rate = 0.95;
-  u.pitch = 1.0;
-  window.speechSynthesis.speak(u);
-}
+let lastSpeak = 0;
 
-function dist(a,b){
-  return Math.hypot(a.x-b.x,a.y-b.y);
-}
 
-function avgPoint(points){
-  return {
-    x: points.reduce((s,p)=>s+p.x,0)/points.length,
-    y: points.reduce((s,p)=>s+p.y,0)/points.length
-  };
-}
+/* SƏS */
 
-/*
-  Bu HTML versiyası MediaPipe Face Mesh ilə üzü və göz konturlarını tapır.
-  Başın vəziyyəti ilə yanaşı gözlərin nisbi mövqeyindən baxış istiqamətini təxmini çıxarır.
-*/
-function getGazeDirection(lm){
-  // MediaPipe Face Mesh göz nöqtələri
-  const leftEye = [33,133,159,145,160,144].map(i=>lm[i]);
-  const rightEye = [362,263,386,374,387,373].map(i=>lm[i]);
+function speak(text) {
 
-  const lCenter = avgPoint(leftEye);
-  const rCenter = avgPoint(rightEye);
-
-  const lWidth = dist(lm[33], lm[133]);
-  const rWidth = dist(lm[362], lm[263]);
-
-  const lTop = avgPoint([lm[159],lm[160]]);
-  const lBottom = avgPoint([lm[145],lm[144]]);
-  const rTop = avgPoint([lm[386],lm[387]]);
-  const rBottom = avgPoint([lm[374],lm[373]]);
-
-  // İrisi ayrıca dəqiq ayrılmadığı üçün göz qapaqları arasında mesh nisbəti istifadə olunur.
-  // Daha güclü hərəkətdə istiqaməti seçmək üçün normalizə edirik.
-  const hx = ((lCenter.x - .5) + (rCenter.x - .5)) / 2;
-  const vy = (((lCenter.y - .5) + (rCenter.y - .5)) / 2);
-
-  // Üzün mərkəzini taparaq onunla müqayisə
-  const nose = lm[1];
-  const faceCenter = {x:nose.x, y:nose.y};
-
-  const eyeMid = {x:(lCenter.x+rCenter.x)/2, y:(lCenter.y+rCenter.y)/2};
-
-  // Kameraya görə nisbi dəyişmə
-  const dx = (eyeMid.x - faceCenter.x);
-  const dy = (eyeMid.y - faceCenter.y);
-
-  // Təxmini baş/üz istiqaməti komponentləri
-  let h="", v="";
-  if(dx > 0.025) h="Sağ";
-  else if(dx < -0.025) h="Sol";
-
-  if(dy < -0.018) v="Yuxarı";
-  else if(dy > 0.018) v="Aşağı";
-
-  if(v && h) return v+" "+h;
-  if(v) return v;
-  if(h) return h;
-  return "Mərkəz";
-}
-
-function processResults(results){
-  if(!results.multiFaceLandmarks || results.multiFaceLandmarks.length===0){
-    directionEl.textContent = "Üz tapılmadı";
-    statusEl.textContent = "Üzünü kameraya tərəf tut.";
-    stableDirection="";
-    return;
-  }
-
-  const d = getGazeDirection(results.multiFaceLandmarks[0]);
-  directionEl.textContent = d;
-  statusEl.textContent = "İstiqamət aşkarlandı";
-
-  const now = Date.now();
-  if(d !== stableDirection){
-    stableDirection=d;
-    stableSince=now;
-  }
-
-  // Səhv ani titrəmələrin qarşısını almaq üçün istiqamət 180 ms sabit qalsın.
-  if(d !== "Mərkəz" && now-stableSince >= 180){
-    if(d !== lastDirection || now-lastSpeakAt >= 1000){
-      lastDirection=d;
-      lastSpeakAt=now;
-      say(d);
+    if (!("speechSynthesis" in window)) {
+        return;
     }
-  } else if(d==="Mərkəz"){
-    lastDirection="";
-  }
+
+    speechSynthesis.cancel();
+
+    const voice =
+        new SpeechSynthesisUtterance(text);
+
+    voice.lang = "az-AZ";
+
+    voice.rate = 0.9;
+
+    voice.pitch = 1;
+
+    speechSynthesis.speak(voice);
 }
 
-async function start(){
-  startBtn.disabled=true;
-  statusEl.textContent="Kamera açılır...";
 
-  try{
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video:{
-        facingMode:"user",
-        width:{ideal:1280},
-        height:{ideal:720}
-      },
-      audio:false
-    });
-    video.srcObject=stream;
-    await video.play();
+/* İKİ NÖQTƏ ARASINDA MƏSAFƏ */
 
-    faceMesh = new FaceMesh({
-      locateFile: (file) =>
-        `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${file}`
-    });
+function distance(a, b) {
 
-    faceMesh.setOptions({
-      maxNumFaces:1,
-      refineLandmarks:true,
-      minDetectionConfidence:0.55,
-      minTrackingConfidence:0.55
-    });
+    return Math.sqrt(
+        Math.pow(a.x - b.x, 2) +
+        Math.pow(a.y - b.y, 2)
+    );
 
-    faceMesh.onResults(processResults);
-
-    camera = new Camera(video,{
-      onFrame: async()=>{ await faceMesh.send({image:video}); },
-      width:1280,
-      height:720
-    });
-    camera.start();
-
-    directionEl.textContent="Hazır";
-    statusEl.textContent="Üzünü çərçivəyə sal.";
-  }catch(e){
-    console.error(e);
-    startBtn.disabled=false;
-    directionEl.textContent="Xəta";
-    statusEl.textContent="Kamera icazəsi verilmədi və ya brauzer bunu dəstəkləmir.";
-  }
 }
 
-startBtn.addEventListener('click', ()=>{
-  // Brauzer səs bloklamasını açmaq üçün istifadəçi toxunuşundan sonra səssiz sınaq.
-  if('speechSynthesis' in window){
-    const u=new SpeechSynthesisUtterance('');
-    u.lang='az-AZ';
-    window.speechSynthesis.speak(u);
-  }
-  start();
-});
+
+/* GÖZLƏRİN İSTİQAMƏTİ */
+
+function getDirection(points) {
+
+    /*
+    MediaPipe iris nöqtələri:
+
+    Sol iris = 468
+    Sağ iris = 473
+
+    Sol göz kənarları:
+    33 - 133
+
+    Sağ göz kənarları:
+    362 - 263
+    */
+
+
+    if (points.length < 478) {
+
+        return "Mərkəz";
+
+    }
+
+
+    const leftIris =
+        points[468];
+
+    const rightIris =
+        points[473];
+
+
+    const leftWidth =
+        distance(points[33], points[133]);
+
+    const rightWidth =
+        distance(points[362], points[263]);
+
+
+    /*
+    İrisin göz daxilindəki mövqeyi
+    */
+
+    const leftX =
+        (leftIris.x - points[33].x)
+        / leftWidth;
+
+    const rightX =
+        (rightIris.x - points[362].x)
+        / rightWidth;
+
+
+    /*
+    Yuxarı / aşağı
+    */
+
+    const leftY =
+        leftIris.y -
+        ((points[159].y + points[145].y) / 2);
+
+    const rightY =
+        rightIris.y -
+        ((points[386].y + points[374].y) / 2);
+
+
+    const x =
+        ((leftX - 0.5) +
+        (rightX - 0.5)) / 2;
+
+
+    const y =
+        (leftY + rightY) / 2;
+
+
+    let horizontal = "";
+
+    let vertical = "";
+
+
+    /*
+    SAĞ / SOL
+    */
+
+    if (x > 0.075) {
+
+        horizontal = "Sol";
+
+    }
+
+    else if (x < -0.075) {
+
+        horizontal = "Sağ";
+
+    }
+
+
+    /*
+    YUXARI / AŞAĞI
+    */
+
+    if (y < -0.12) {
+
+        vertical = "Yuxarı";
+
+    }
+
+    else if (y > 0.12) {
+
+        vertical = "Aşağı";
+
+    }
+
+
+    /*
+    DİAQONAL
+    */
+
+    if (vertical && horizontal) {
+
+        return vertical + " " + horizontal;
+
+    }
+
+
+    if (vertical) {
+
+        return vertical;
+
+    }
+
+
+    if (horizontal) {
+
+        return horizontal;
+
+    }
+
+
+    return "Mərkəz";
+
+}
+
+
+/* NƏTİCƏ */
+
+function onResults(results) {
+
+    if (
+        !results.multiFaceLandmarks ||
+        results.multiFaceLandmarks.length === 0
+    ) {
+
+        direction.innerText =
+            "Üz tapılmadı";
+
+        status.innerText =
+            "Üzünü kameraya tut";
+
+        return;
+
+    }
+
+
+    const points =
+        results.multiFaceLandmarks[0];
+
+
+    const result =
+        getDirection(points);
+
+
+    direction.innerText =
+        result;
+
+    status.innerText =
+        "Baxış istiqaməti izlənilir";
+
+
+    const now =
+        Date.now();
+
+
+    /*
+    Eyni istiqamətdə davamlı
+    danışmağın qarşısını alırıq.
+    */
+
+    if (
+        result !== "Mərkəz" &&
+        (
+            result !== lastDirection ||
+            now - lastSpeak > 1200
+        )
+    ) {
+
+        lastDirection =
+            result;
+
+        lastSpeak =
+            now;
+
+        speak(result);
+
+    }
+
+
+    if (result === "Mərkəz") {
+
+        lastDirection = "";
+
+    }
+
+}
+
+
+/* KAMERA */
+
+async function startCamera() {
+
+    try {
+
+        const stream =
+            await navigator.mediaDevices
+            .getUserMedia({
+
+                video: {
+
+                    facingMode: "user",
+
+                    width: {
+                        ideal: 1280
+                    },
+
+                    height: {
+                        ideal: 720
+                    }
+
+                },
+
+                audio: false
+
+            });
+
+
+        video.srcObject =
+            stream;
+
+
+        await video.play();
+
+
+        /*
+        MediaPipe Face Mesh
+        */
+
+        faceMesh =
+            new FaceMesh({
+
+                locateFile:
+                function(file) {
+
+                    return
+                    "https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/" + file;
+
+                }
+
+            });
+
+
+        faceMesh.setOptions({
+
+            maxNumFaces: 1,
+
+            refineLandmarks: true,
+
+            minDetectionConfidence: 0.5,
+
+            minTrackingConfidence: 0.5
+
+        });
+
+
+        faceMesh.onResults(
+            onResults
+        );
+
+
+        /*
+        Kameradan görüntünü
+        Face Mesh-ə göndər
+        */
+
+        camera =
+            new Camera(
+
+                video,
+
+                {
+
+                    onFrame:
+                    async function() {
+
+                        await faceMesh.send({
+                            image: video
+                        });
+
+                    },
+
+                    width: 1280,
+
+                    height: 720
+
+                }
+
+            );
+
+
+        camera.start();
+
+
+        direction.innerText =
+            "Hazır";
+
+        status.innerText =
+            "Gözlərinlə istiqamətə bax";
+
+
+    }
+
+    catch (error) {
+
+        console.error(error);
+
+        direction.innerText =
+            "Xəta";
+
+        status.innerText =
+            "Kamera açıla bilmədi";
+
+    }
+
+}
+
 </script>
+
 </body>
 </html>
